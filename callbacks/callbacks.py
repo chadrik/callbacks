@@ -2,6 +2,7 @@ from types import MethodType
 from collections import defaultdict
 import uuid
 import inspect
+from weakref import WeakKeyDictionary
 
 class SupportsCallbacks(object):
     '''
@@ -10,14 +11,19 @@ class SupportsCallbacks(object):
     target function (or after the target function raises an exception).
     See the docstring for add_*_callback for more information.
     '''
-    def __init__(self, target, target_is_method=False):
+    def __init__(self, target, target_is_method=False, parent=None):
         self.id = uuid.uuid4()
         self._target_is_method = target_is_method
         self.target = target
         self._update_docstring(target)
+        self._instances = WeakKeyDictionary()
+        self._parent = parent
         self._initialize()
 
-    def __get__(self, obj, obj_type=None):
+    def __repr__(self):
+        return "%s(%r)" % (self.__class__.__name__, self.target)
+
+    def __get__(self, instance, cls=None):
         """
             To allow each instance of a class to have different callbacks
         registered we store a callback registry on the instance itself.
@@ -26,15 +32,17 @@ class SupportsCallbacks(object):
         """
         # in case this method is being called on the class instead of an
         # instance
-        if obj is None:
+        if instance is None:
             return self
 
-        if (not hasattr(obj, '_callback_registry')):
-            obj._callback_registry = {}
-        if (self.id not in obj._callback_registry):
-            obj._callback_registry[self.id] = SupportsCallbacks(self.target,
-                    target_is_method=True)
-        return MethodType(obj._callback_registry[self.id], obj, obj_type)
+        if (instance not in self._instances):
+            proxy = SupportsCallbacks(self.target,
+                                         parent=self)
+            proxy = MethodType(proxy, instance, cls)
+            self._instances[instance] = proxy
+        else:
+            proxy = self._instances[instance]
+        return proxy
 
     def _update_docstring(self, target):
         method_or_function = {True:'method',
@@ -192,6 +200,7 @@ This %s supports callbacks.
         Returns:
             label
         '''
+
         priority, label = self._add_callback(callback=callback,
                 priority=priority, label=label,
                 takes_target_args=takes_target_args, type='pre')
@@ -205,7 +214,7 @@ This %s supports callbacks.
             raise ValueError('Priority could not be cast into a float.')
 
         if label is None:
-            label = uuid.uuid4()
+            label = callback
 
         if label in self.callbacks.keys():
             raise RuntimeError('Callback with label="%s" already registered.'
@@ -272,12 +281,21 @@ This %s supports callbacks.
         else:
             cb_args = args
 
+        # FIXME: merge priorities between self and parent
         self._call_pre_callbacks(*cb_args, **kwargs)
+        if self._parent:
+            self._parent._call_pre_callbacks(*cb_args, **kwargs)
         try:
             target_result = self.target(*args, **kwargs)
         except Exception as e:
             target_result = self._call_exception_callbacks(e, *cb_args, **kwargs)
+            if self._parent:
+                self._parent._call_pre_callbacks(*cb_args, **kwargs)
+        # FIXME: the post callback should not be called if the main function
+        # errors.
         self._call_post_callbacks(target_result, *cb_args, **kwargs)
+        if self._parent:
+            self._parent._call_post_callbacks(target_result, *cb_args, **kwargs)
         return target_result
 
     def _call_pre_callbacks(self, *args, **kwargs):
