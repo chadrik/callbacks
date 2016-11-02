@@ -1,7 +1,9 @@
 *.pyc
 /*.egg
 /*.egg-info
-/.coverage
+/.coverage*
 /.tox
+/.eggs
+/.idea
 /AUTHORS
 /ChangeLog

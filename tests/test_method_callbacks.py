@@ -38,7 +38,7 @@ class TestOnMethod(unittest.TestCase):
         self.assertEquals(e.method_called_with[0],
                 ((10, 20), {'key':'value'}))
 
-        e.example_method.add_callback(example_callback)
+        e.example_method.on_return.add_callback(example_callback)
 
         e.example_method(11, 21, key='another_value')
         self.assertEquals(len(callback_called_with), 1)
@@ -57,7 +57,7 @@ class TestOnMethod(unittest.TestCase):
         self.assertEquals(e.method_called_with[0],
                 ((10, 20), {'key':'value'}))
 
-        e.example_method.add_callback(example_callback,
+        e.example_method.on_return.add_callback(example_callback,
                 takes_target_args=True)
 
         e.example_method(11, 21, key='another_value')

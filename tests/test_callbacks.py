@@ -1,6 +1,5 @@
 from __future__ import absolute_import, print_function
 import unittest
-import uuid
 
 from callbacks import supports_callbacks
 
@@ -8,7 +7,7 @@ called_with = []
 def callback(*args, **kwargs):
     called_with.append((args, kwargs))
 
-@supports_callbacks()
+@supports_callbacks
 def foo(bar, baz='bone'):
     return (bar, baz)
 
@@ -33,7 +32,7 @@ class TestCallbackDecorator(unittest.TestCase):
         self.assertEquals(result, (10, 20))
         self.assertEquals(len(called_with), 0)
 
-        foo.add_callback(callback)
+        foo.on_return.add_callback(callback)
 
         result = foo(10, 20)
         self.assertEquals(result, (10, 20))
@@ -46,32 +45,32 @@ class TestCallbackDecorator(unittest.TestCase):
         self.assertEquals(called_with[1], (tuple(), {}))
 
     def test_raises(self):
-        self.assertRaises(ValueError, foo.add_callback, callback, priority='boo')
+        self.assertRaises(ValueError, foo.on_return.add_callback, callback, priority='boo')
 
-    def test_duplicate_label(self):
-        foo.add_callback(callback, label='a')
-        self.assertRaises(RuntimeError, foo.add_callback, callback, label='a')
+    def test_duplicate_id(self):
+        foo.on_return.add_callback(callback, id='a')
+        self.assertRaises(RuntimeError, foo.on_return.add_callback, callback, id='a')
 
     def test_remove_raises(self):
-        foo.add_callback(callback)
-        foo.add_callback(callback, label='good_label')
+        foo.on_return.add_callback(callback)
+        foo.on_return.add_callback(callback, id='good_id')
 
-        self.assertRaises(RuntimeError, foo.remove_callback, 'bad_label')
-        self.assertRaises(RuntimeError, foo.remove_callbacks, ['bad_label', 'good_label'])
-        self.assertEqual(len(foo.callbacks), 1)
+        self.assertRaises(RuntimeError, foo.on_return.remove_callback, 'bad_id')
+        self.assertRaises(RuntimeError, foo.on_return.remove_callbacks, ['bad_id', 'good_id'])
+        self.assertEqual(len(foo.on_return.callbacks), 1)
 
     def test_callbacks_info(self):
-        foo.add_pre_callback(callback, label='a')
-        foo.add_pre_callback(callback, label='b', takes_target_args=True)
-        foo.add_post_callback(callback, label='c', priority=1.1,
+        foo.on_call.add_callback(callback, id='a')
+        foo.on_call.add_callback(callback, id='b', takes_target_args=True)
+        foo.on_return.add_callback(callback, id='c', priority=1.1,
                 takes_target_result=True)
-        foo.add_exception_callback(callback, label='d')
+        foo.on_exception.add_callback(callback, id='d')
         expected_string = '''\
-Label                                   Priority   Order   Type        Handles exception  Takes args  Takes result
-a                                       0.0        0       pre         N/A                0           N/A
-b                                       0.0        1       pre         N/A                1           N/A
-c                                       1.1        0       post        N/A                0           1
-d                                       0.0        0       exception   0                  0           N/A'''
+Label                                   Priority   Order   Event            Handles exception  Takes args  Takes result
+a                                       0.0        0       on_call          N/A                false       N/A
+b                                       0.0        1       on_call          N/A                true        N/A
+c                                       1.1        0       on_return        N/A                false       true
+d                                       0.0        0       on_exception     false              false       N/A'''
         print(foo._callbacks_info)
         self.assertEquals(expected_string, foo._callbacks_info)
 
@@ -80,7 +79,7 @@ d                                       0.0        0       exception   0        
         self.assertEquals(result, (10, 20))
         self.assertEquals(len(called_with), 0)
 
-        foo.add_callback(callback, takes_target_args=True)
+        foo.on_return.add_callback(callback, takes_target_args=True)
 
         result = foo(10, 20)
         self.assertEquals(result, (10, 20))
@@ -97,7 +96,7 @@ d                                       0.0        0       exception   0        
         self.assertEquals(result, (10, 20))
         self.assertEquals(len(called_with), 0)
 
-        foo.add_callback(callback, takes_target_result=True)
+        foo.on_return.add_callback(callback, takes_target_result=True)
 
         result = foo(10, 20)
         self.assertEquals(result, (10, 20))
@@ -114,7 +113,7 @@ d                                       0.0        0       exception   0        
         self.assertEquals(result, (10, 20))
         self.assertEquals(len(called_with), 0)
 
-        foo.add_callback(callback, takes_target_result=True,
+        foo.on_return.add_callback(callback, takes_target_result=True,
                 takes_target_args=True)
 
         result = foo(10, 20)
@@ -132,7 +131,7 @@ d                                       0.0        0       exception   0        
         self.assertEquals(result, (10, 20))
         self.assertEquals(len(called_with), 0)
 
-        foo.add_pre_callback(callback)
+        foo.on_call.add_callback(callback)
 
         result = foo(10, 20)
         self.assertEquals(result, (10, 20))
@@ -149,7 +148,7 @@ d                                       0.0        0       exception   0        
         self.assertEquals(result, (10, 20))
         self.assertEquals(len(called_with), 0)
 
-        foo.add_pre_callback(callback, takes_target_args=True)
+        foo.on_call.add_callback(callback, takes_target_args=True)
 
         result = foo(10, 20)
         self.assertEquals(result, (10, 20))
@@ -166,9 +165,9 @@ d                                       0.0        0       exception   0        
         self.assertEquals(result, (10, 20))
         self.assertEquals(len(called_order), 0)
 
-        foo.add_pre_callback(cb1)
-        foo.add_pre_callback(cb2)
-        foo.add_pre_callback(cb3)
+        foo.on_call.add_callback(cb1)
+        foo.on_call.add_callback(cb2)
+        foo.on_call.add_callback(cb3)
 
         result = foo(10, 20)
         self.assertEquals(result, (10, 20))
@@ -179,9 +178,9 @@ d                                       0.0        0       exception   0        
         self.assertEquals(result, (10, 20))
         self.assertEquals(len(called_order), 0)
 
-        foo.add_pre_callback(cb1)
-        foo.add_pre_callback(cb2, priority=1)
-        foo.add_pre_callback(cb3, priority=1)
+        foo.on_call.add_callback(cb1)
+        foo.on_call.add_callback(cb2, priority=1)
+        foo.on_call.add_callback(cb3, priority=1)
 
         result = foo(10, 20)
         self.assertEquals(result, (10, 20))
@@ -192,9 +191,9 @@ d                                       0.0        0       exception   0        
         self.assertEquals(result, (10, 20))
         self.assertEquals(len(called_order), 0)
 
-        foo.add_callback(cb1)
-        foo.add_callback(cb2)
-        foo.add_callback(cb3)
+        foo.on_return.add_callback(cb1)
+        foo.on_return.add_callback(cb2)
+        foo.on_return.add_callback(cb3)
 
         result = foo(10, 20)
         self.assertEquals(result, (10, 20))
@@ -205,9 +204,9 @@ d                                       0.0        0       exception   0        
         self.assertEquals(result, (10, 20))
         self.assertEquals(len(called_order), 0)
 
-        foo.add_callback(cb1)
-        foo.add_callback(cb2, priority=1)
-        foo.add_callback(cb3, priority=1)
+        foo.on_return.add_callback(cb1)
+        foo.on_return.add_callback(cb2, priority=1)
+        foo.on_return.add_callback(cb3, priority=1)
 
         result = foo(10, 20)
         self.assertEquals(result, (10, 20))
@@ -218,55 +217,89 @@ d                                       0.0        0       exception   0        
         self.assertEquals(result, (10, 20))
         self.assertEquals(len(called_order), 0)
 
-        foo.add_callback(cb1)
-        label = foo.add_callback(cb2)
-        foo.add_callback(cb3)
+        foo.on_return.add_callback(cb1)
+        id = foo.on_return.add_callback(cb2)
+        foo.on_return.add_callback(cb3)
 
         result = foo(10, 20)
         self.assertEquals(result, (10, 20))
         self.assertEquals(called_order, ['cb1','cb2','cb3'])
 
-        foo.remove_callback(label)
+        foo.remove_callback(id)
 
         result = foo(10, 20)
         self.assertEquals(result, (10, 20))
         self.assertEquals(called_order, ['cb1','cb2','cb3', 'cb1', 'cb3'])
 
-    def test_remove_callbacks(self):
+    def test_remove_callbacks_by_id(self):
         result = foo(10, 20)
         self.assertEquals(result, (10, 20))
         self.assertEquals(len(called_order), 0)
 
-        l1 = foo.add_callback(cb1)
-        l2 = foo.add_callback(cb2)
-        foo.add_callback(cb3)
+        l1 = foo.on_return.add_callback(cb1)
+        l2 = foo.on_return.add_callback(cb2)
+        foo.on_return.add_callback(cb3)
 
         result = foo(10, 20)
         self.assertEquals(result, (10, 20))
-        self.assertEquals(called_order, ['cb1','cb2','cb3'])
+        self.assertEquals(called_order, ['cb1', 'cb2', 'cb3'])
 
-        foo.remove_callbacks([l1, l2])
+        foo.on_return.remove_callbacks([l1, l2])
 
+        # only cb3 remains
         result = foo(10, 20)
         self.assertEquals(result, (10, 20))
-        self.assertEquals(called_order, ['cb1','cb2','cb3', 'cb3'])
+        self.assertEquals(called_order, ['cb1', 'cb2', 'cb3', 'cb3'])
 
-        foo.remove_callbacks()
-
-        result = foo(10, 20)
-        self.assertEquals(result, (10, 20))
-        self.assertEquals(called_order, ['cb1','cb2','cb3', 'cb3'])
-
-    def test_labels(self):
+    def test_remove_callbacks_without_id(self):
         result = foo(10, 20)
         self.assertEquals(result, (10, 20))
         self.assertEquals(len(called_order), 0)
 
-        l1 = foo.add_callback(cb1, label=1)
-        l2 = foo.add_pre_callback(cb2, label=2)
-        l3 = foo.add_callback(cb3)
+        foo.on_return.add_callback(cb1)
+        foo.on_return.add_callback(cb2)
+        foo.on_return.add_callback(cb3)
+
+        result = foo(10, 20)
+        self.assertEquals(result, (10, 20))
+        self.assertEquals(called_order, ['cb1', 'cb2', 'cb3'])
+
+        foo.on_return.remove_callbacks([cb1, cb2])
+
+        # only cb3 remains
+        result = foo(10, 20)
+        self.assertEquals(result, (10, 20))
+        self.assertEquals(called_order, ['cb1', 'cb2', 'cb3', 'cb3'])
+
+    def test_remove_all_callbacks(self):
+        result = foo(10, 20)
+        self.assertEquals(result, (10, 20))
+        self.assertEquals(len(called_order), 0)
+
+        foo.on_return.add_callback(cb1)
+        foo.on_return.add_callback(cb2)
+        foo.on_return.add_callback(cb3)
+
+        result = foo(10, 20)
+        self.assertEquals(result, (10, 20))
+        self.assertEquals(called_order, ['cb1', 'cb2', 'cb3'])
+
+        foo.on_return.remove_callbacks()
+
+        # no callbacks remain
+        result = foo(10, 20)
+        self.assertEquals(result, (10, 20))
+        self.assertEquals(called_order, ['cb1', 'cb2', 'cb3'])
+
+    def test_ids(self):
+        result = foo(10, 20)
+        self.assertEquals(result, (10, 20))
+        self.assertEquals(len(called_order), 0)
+
+        l1 = foo.on_return.add_callback(cb1, id=1)
+        l2 = foo.on_call.add_callback(cb2, id=2)
+        l3 = foo.on_return.add_callback(cb3)
 
         self.assertEquals(l1, 1)
         self.assertEquals(l2, 2)
-        self.assertEquals(type(l3), type(uuid.uuid4()))
-
+        self.assertEquals(type(l3), int)
