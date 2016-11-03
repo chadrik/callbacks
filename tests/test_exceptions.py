@@ -48,6 +48,7 @@ class TestExceptions(unittest.TestCase):
         while called_order:
             called_order.pop()
         foo.remove_callbacks()
+        assert foo.num_callbacks == 0
 
     def test_c1(self):
         foo.on_exception.add_callback(c1)

@@ -24,12 +24,13 @@ else:
 
 class Event(object):
     """
-    Holds a set of callbacks registered using `add_callback()` handles
+    Holds a set of callbacks registered using `add_callback()` and handles
     executing them when `emit()` is called.
     """
-    def __init__(self, name, target_name):
+    def __init__(self, name, target_name=None, parent=None):
         self.name = name
         self.target_name = target_name
+        self.parent = parent
         self._initialize()
 
     def _initialize(self):
@@ -37,6 +38,17 @@ class Event(object):
         self.callbacks = defaultdict(dict)
         # mapping of priority to list of ids
         self._priorities = defaultdict(list)
+
+    def parents(self):
+        parents = []
+        p = self.parent
+        while p:
+            parents.append(p)
+            p = p.parent
+        return parents
+
+    def _make_child(self):
+        return self.__class__(self.name, self.target_name, parent=self)
 
     @staticmethod
     def _callback_id(target):
@@ -52,6 +64,9 @@ class Event(object):
         """
         Iterate over callbacks in order of priority.
         """
+        if self.parent is not None:
+            for x in self.parent._iter_callbacks():
+                yield x
         for priority in sorted(self._priorities.keys(), reverse=True):
             for id in self._priorities[priority]:
                 info = self.callbacks[id]
@@ -173,7 +188,7 @@ class Event(object):
         return results
 
 
-class PostReturnEvent(Event):
+class ReturnEvent(Event):
 
     def add_callback(self, callback, priority=0, id=None,
                      takes_target_args=False, takes_target_result=False):
@@ -292,7 +307,21 @@ class ExceptionEvent(Event):
             return result
 
 
-class AbstractCallbackRegistry(object):
+class EventCollection(object):
+    def __init__(self, events):
+        self.events = []
+        for event in events:
+            if not isinstance(event, Event):
+                event = Event(event)
+            self.events.append(event)
+
+    def __call__(self, target):
+        reg = CallbackRegistry(target)
+        reg._set_events(self.events)
+        return reg
+
+
+class CallbackRegistry(object):
     """
     This decorator enables a function or a class/instance method to register
     callbacks.
@@ -301,8 +330,7 @@ class AbstractCallbackRegistry(object):
     - A CallbackRegistry stores one or more events as attributes
     """
 
-    def __init__(self, target):
-        self.__name__ = target.__name__
+    def __init__(self, target, events):
         self.target = target
         if hasattr(target, '_argspec'):
             self._argspec = target._argspec
@@ -310,45 +338,49 @@ class AbstractCallbackRegistry(object):
             self._argspec = inspect.getargspec(target)
 
         self._target_is_method = False
-        self._events = []
+        self._events = events
+        self._set_events()
         # this will hold the registries for instance method callbacks
         self._instance_registries = WeakKeyDictionary()
         self._initialize()
         # must occur after initialize:
         self._update_docstring(self.target)
 
-    def _add_event(self, name, type=Event):
-        """
-        Add an Event to this registry.  Should be called from _initialize on
-        sub-classes
-        """
-        event = type(name, self.__name__)
-        self._events.append(event)
-        return event
-
     def _initialize(self):
         pass
+
+    def __repr__(self):
+        return '%s(%r)' % (self.__class__.__name__, self.target)
+
+    def _make_child(self):
+        events = [event._make_child() for event in self._events]
+        return self.__class__(self.target, events)
+
+    def _set_events(self):
+        for event in self._events:
+            event.target_name = self.target.__name__
+            setattr(self, event.name, event)
 
     def __call__(self, *args, **kwargs):
         print('self %s %s' % (self, self.target))
         return self.target(*args, **kwargs)
 
-    def __get__(self, obj, obj_type):
+    def __get__(self, instance, obj_type):
         # method is being called on the class instead of an instance
-        if obj is None:
+        if instance is None:
             # when target was decorated, it had not been bound yet, but now it
             # is, so update _target_is_method.
             self._target_is_method = True
             return self
 
-        if obj not in self._instance_registries:
-            callback_registry = self.__class__(self)
-            callback_registry._target_is_method=True
-            self._instance_registries[obj] = callback_registry
+        if instance not in self._instance_registries:
+            callback_registry = self._make_child()
+            callback_registry._target_is_method = True
+            self._instance_registries[instance] = callback_registry
         else:
-            callback_registry = self._instance_registries[obj]
+            callback_registry = self._instance_registries[instance]
 
-        return create_bound_method(callback_registry, obj)
+        return create_bound_method(callback_registry, instance)
 
     @property
     def _callbacks_info(self):
@@ -408,7 +440,10 @@ class AbstractCallbackRegistry(object):
 
     def remove_callbacks(self):
         """
-        Remove callbacks from all events
+        Remove callbacks from all events.
+
+        Note, for instances, this does not affect callbacks registered at the
+        class level.
         """
         for event in self._events:
             event.remove_callbacks()
@@ -426,11 +461,8 @@ class AbstractCallbackRegistry(object):
             -or-
             num_class_level_callbacks + num_instance_level_callbacks
         """
-        num = sum(len(event.callbacks) for event in self._events)
-        if isinstance(self.target, self.__class__):
-            return self.target.num_callbacks + num
-        else:
-            return num
+        return sum(len(list(event._iter_callbacks()))
+                   for event in self._events)
 
     def _update_docstring(self, target):
         old_docstring = target.__doc__
@@ -452,13 +484,7 @@ class AbstractCallbackRegistry(object):
         self.__doc__ = old_docstring + '\n'.join(lines)
 
 
-class SingleEvent(AbstractCallbackRegistry):
-    def _initialize(self):
-        self.event = self._add_event('event', Event)
-        self.add_callback = self.event.add_callback
-
-
-class AutoCallbacks(AbstractCallbackRegistry):
+class AutoCallbacks(CallbackRegistry):
     """
 
     This is a decorator.  Once a function/method is decorated, callbacks can
@@ -481,10 +507,24 @@ class AutoCallbacks(AbstractCallbackRegistry):
         <target>.list_callbacks()
 
     """
-    def _initialize(self):
-        self.on_call = self._add_event('on_call', Event)
-        self.on_return = self._add_event('on_return', PostReturnEvent)
-        self.on_exception = self._add_event('on_exception', ExceptionEvent)
+
+    def __init__(self, target, events=None):
+        if events is None:
+            events = [
+                Event('on_call'),
+                ReturnEvent('on_return'),
+                ExceptionEvent('on_exception')
+            ]
+        super(AutoCallbacks, self).__init__(target, events)
+
+    # def _initialize(self):
+    #     # self.on_call = self._add_event('on_call', Event)
+    #     # self.on_return = self._add_event('on_return', ReturnEvent)
+    #     # self.on_exception = self._add_event('on_exception', ExceptionEvent)
+    #
+    #     self._set_events([Event('on_call'),
+    #                       ReturnEvent('on_return'),
+    #                       ExceptionEvent('on_exception')])
 
     def __call__(self, *args, **kwargs):
         print('self %s %s' % (self, self.target))
@@ -598,4 +638,18 @@ class AutoCallbacks(AbstractCallbackRegistry):
             handles_exception=handles_exception)
 
 
-supports_callbacks = AutoCallbacks
+def supports_callbacks(*args):
+    if not args:
+        # @supports_callbacks()
+        return AutoCallbacks
+    elif len(args) == 1 and callable(args[0]):
+        # @supports_callbacks
+        return AutoCallbacks(args[0])
+    else:
+        # @supports_callbacks('event1', 'event2', ReturnEvent('event3'))
+        def decorator(target):
+            return CallbackRegistry(
+                target,
+                [Event(event) if not isinstance(event, Event) else event
+                 for event in args])
+        return decorator

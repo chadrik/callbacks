@@ -52,11 +52,10 @@ class TestClassLevel(unittest.TestCase):
     def test_instance_level_callbacks_do_NOT_fire_on_other_instances(self):
         called_with = []
         def callback(value):
-            called_with.append(value)
+            called_with.append(('inst', value))
 
-        class_called_with = []
         def class_callback(value):
-            class_called_with.append(value)
+            called_with.append(('cls', value))
 
         class ExampleClass(object):
             @supports_callbacks
@@ -75,9 +74,7 @@ class TestClassLevel(unittest.TestCase):
         self.assertEquals(b.method.num_callbacks, 1)
 
         a.method(1234)
-        self.assertEquals(class_called_with, [1234])
-        self.assertEquals(called_with, [1234])
+        self.assertEquals(called_with, [('cls', 1234), ('inst', 1234)])
 
         b.method(4321)
-        self.assertEquals(class_called_with, [1234, 4321])
-        self.assertEquals(called_with, [1234])
+        self.assertEquals(called_with, [('cls', 1234), ('inst', 1234), ('cls', 4321)])
