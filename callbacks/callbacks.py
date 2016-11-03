@@ -1,7 +1,8 @@
 from __future__ import absolute_import, print_function
 
 import types
-from collections import defaultdict
+import operator
+from collections import OrderedDict
 from weakref import WeakKeyDictionary, proxy
 import inspect
 import sys
@@ -35,9 +36,7 @@ class Event(object):
 
     def _initialize(self):
         # mapping of id to callback info dict
-        self.callbacks = defaultdict(dict)
-        # mapping of priority to list of ids
-        self._priorities = defaultdict(list)
+        self.callbacks = OrderedDict()
 
     def parents(self):
         parents = []
@@ -64,13 +63,16 @@ class Event(object):
         """
         Iterate over callbacks in order of priority.
         """
-        if self.parent is not None:
-            for x in self.parent._iter_callbacks():
-                yield x
-        for priority in sorted(self._priorities.keys(), reverse=True):
-            for id in self._priorities[priority]:
-                info = self.callbacks[id]
-                yield (info['function'], id, info['extra'])
+        # consider all parents when ordering based on priority
+        parents = self.parents()
+        callbacks = []
+        for depth, event in enumerate([self] + parents):
+            for id, info in event.callbacks.items():
+                callbacks.append(((info['priority'], depth), id, info))
+        callbacks.sort(key=operator.itemgetter(0), reverse=True)
+
+        for key, id, info in callbacks:
+            yield (id, info)
 
     def _add_callback(self, callback, priority, id, extra):
         try:
@@ -91,7 +93,6 @@ class Event(object):
             'extra': extra or {}
         }
         self.callbacks[id] = entry
-        self._priorities[priority].append(id)
         return id
 
     def add_callback(self, callback, priority=0, id=None,
@@ -141,10 +142,6 @@ class Event(object):
                 '%s: No callback with id "%s" attached to function "%s"' %
                 (self.name, id, self.target_name))
 
-        for ids in self._priorities.values():
-            if id in ids:
-                ids.remove(id)
-
         del self.callbacks[id]
 
     def remove_callbacks(self, ids=None):
@@ -179,8 +176,9 @@ class Event(object):
         Call all of the callbacks registered with this event.
         """
         results = {}
-        for callback, id, extra in self._iter_callbacks():
-            takes_target_args = extra['takes_args']
+        for id, info in self._iter_callbacks():
+            callback = info['function']
+            takes_target_args = info['extra']['takes_args']
             if takes_target_args:
                 results[id] = callback(*args, **kwargs)
             else:
@@ -221,9 +219,10 @@ class ReturnEvent(Event):
 
     def emit(self, target_result, *args, **kwargs):
         results = {}
-        for callback, id, extra in self._iter_callbacks():
-            takes_target_args = extra['takes_args']
-            takes_target_result = extra['takes_result']
+        for id, info in self._iter_callbacks():
+            callback = info['function']
+            takes_target_args = info['extra']['takes_args']
+            takes_target_result = info['extra']['takes_result']
             if takes_target_args and takes_target_result:
                 results[id] = callback(target_result, *args, **kwargs)
             elif takes_target_result:
@@ -274,9 +273,10 @@ class ExceptionEvent(Event):
 
     def emit(self, exception, *args, **kwargs):
         result = None
-        for callback, id, extra in self._iter_callbacks():
-            takes_target_args = extra['takes_args']
-            handles_exception = extra['handles_exception']
+        for id, info in self._iter_callbacks():
+            callback = info['function']
+            takes_target_args = info['extra']['takes_args']
+            handles_exception = info['extra']['handles_exception']
 
             if handles_exception and exception is None:
                 # exception has already been handled, only call callbacks
@@ -410,8 +410,7 @@ class CallbackRegistry(object):
             return v
 
         for event in self._events:
-            for id, info in sorted(event.callbacks.items()):
-                order = event._priorities[info['priority']].index(id)
+            for order, (id, info) in enumerate(event._iter_callbacks()):
                 extra = info['extra']
                 lines.append(
                     format_string.format(id=id, priority=info['priority'],

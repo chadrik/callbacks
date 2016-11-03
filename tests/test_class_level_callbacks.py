@@ -78,3 +78,30 @@ class TestClassLevel(unittest.TestCase):
 
         b.method(4321)
         self.assertEquals(called_with, [('cls', 1234), ('inst', 1234), ('cls', 4321)])
+
+    def test_combined_priority(self):
+
+        called_order = []
+
+        def cb1(*args, **kwargs):
+            called_order.append('cb1')
+
+        def cb2(*args, **kwargs):
+            called_order.append('cb2')
+
+        def cb3(*args, **kwargs):
+            called_order.append('cb3')
+
+        class ExampleClass(object):
+            @supports_callbacks
+            def method(self, value):
+                pass
+
+        # registered before instance is created
+        ExampleClass.method.on_return.add_callback(cb1, priority=3)
+        ExampleClass.method.on_return.add_callback(cb2, priority=0)
+
+        e = ExampleClass()
+        e.method.on_return.add_callback(cb3, priority=2)
+        e.method(1234)
+        self.assertEquals(called_order, ['cb1', 'cb3', 'cb2'])
