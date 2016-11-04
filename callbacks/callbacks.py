@@ -307,20 +307,6 @@ class ExceptionEvent(Event):
             return result
 
 
-class EventCollection(object):
-    def __init__(self, events):
-        self.events = []
-        for event in events:
-            if not isinstance(event, Event):
-                event = Event(event)
-            self.events.append(event)
-
-    def __call__(self, target):
-        reg = CallbackRegistry(target)
-        reg._set_events(self.events)
-        return reg
-
-
 class CallbackRegistry(object):
     """
     This decorator enables a function or a class/instance method to register
@@ -337,7 +323,6 @@ class CallbackRegistry(object):
         else:
             self._argspec = inspect.getargspec(target)
 
-        self._target_is_method = False
         self._events = events
         self._set_events()
         # this will hold the registries for instance method callbacks
@@ -352,9 +337,9 @@ class CallbackRegistry(object):
     def __repr__(self):
         return '%s(%r)' % (self.__class__.__name__, self.target)
 
-    def _make_child(self):
+    def _make_child(self, target):
         events = [event._make_child() for event in self._events]
-        return self.__class__(self.target, events)
+        return self.__class__(target, events)
 
     def _set_events(self):
         for event in self._events:
@@ -368,19 +353,16 @@ class CallbackRegistry(object):
     def __get__(self, instance, obj_type):
         # method is being called on the class instead of an instance
         if instance is None:
-            # when target was decorated, it had not been bound yet, but now it
-            # is, so update _target_is_method.
-            self._target_is_method = True
             return self
 
         if instance not in self._instance_registries:
-            callback_registry = self._make_child()
-            callback_registry._target_is_method = True
+            target = create_bound_method(self.target, instance)
+            callback_registry = self._make_child(target)
             self._instance_registries[instance] = callback_registry
         else:
             callback_registry = self._instance_registries[instance]
 
-        return create_bound_method(callback_registry, instance)
+        return callback_registry
 
     @property
     def _callbacks_info(self):
@@ -527,17 +509,13 @@ class AutoCallbacks(CallbackRegistry):
 
     def __call__(self, *args, **kwargs):
         print('self %s %s' % (self, self.target))
-        if self._target_is_method:
-            cb_args = args[1:]  # skip over 'self' arg
-        else:
-            cb_args = args
 
-        self.on_call.emit(*cb_args, **kwargs)
+        self.on_call.emit(*args, **kwargs)
         try:
             target_result = self.target(*args, **kwargs)
         except Exception as e:
-            target_result = self.on_exception.emit(e, *cb_args, **kwargs)
-        self.on_return.emit(target_result, *cb_args, **kwargs)
+            target_result = self.on_exception.emit(e, *args, **kwargs)
+        self.on_return.emit(target_result, *args, **kwargs)
         return target_result
 
     # -- wrappers, for backward compatibility
