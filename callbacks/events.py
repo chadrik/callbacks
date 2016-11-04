@@ -5,6 +5,18 @@ import operator
 from collections import OrderedDict
 
 
+def _merge_options(default_options, sparse_options):
+    invalid = set(sparse_options.keys()).difference(default_options.keys())
+    if invalid:
+        raise RuntimeError("Invalid option(s): %s. Please provide one of %s" %
+                           (invalid, default_options.keys()))
+    result = default_options.copy()
+    for key, value in sparse_options.items():
+        if value is not None:
+            result[key] = value
+    return result
+
+
 class Event(object):
     """
     Holds a set of callbacks registered using `add_callback()` and handles
@@ -18,7 +30,7 @@ class Event(object):
         self.name = name
         self.target_name = target_name
         self.parent = parent
-        self.options = options or self.__class__.options
+        self.options = _merge_options(self.__class__.options, options or {})
         self._initialize()
 
     def _initialize(self):
@@ -32,13 +44,6 @@ class Event(object):
             parents.append(p)
             p = p.parent
         return parents
-
-    def _merge_options(self, options):
-        result = self.options.copy()
-        for key, value in options.items():
-            if value is not None:
-                result[key] = value
-        return result
 
     def _make_child(self):
         """
@@ -123,7 +128,8 @@ class Event(object):
         """
         return self._add_callback(
             callback=callback, priority=priority, id=id,
-            options=self._merge_options({'pass_args': takes_target_args}))
+            options=_merge_options(self.options,
+                                   {'pass_args': takes_target_args}))
 
     def remove_callback(self, id):
         """
@@ -224,8 +230,9 @@ class ReturnEvent(Event):
         """
         return self._add_callback(
             callback=callback, priority=priority, id=id,
-            options=self._merge_options({'pass_args': takes_target_args,
-                                         'pass_result': takes_target_result}))
+            options=_merge_options(self.options,
+                                   {'pass_args': takes_target_args,
+                                    'pass_result': takes_target_result}))
 
     def emit(self, target_result, *args, **kwargs):
         results = {}
@@ -283,8 +290,9 @@ class ExceptionEvent(Event):
         """
         return self._add_callback(
             callback=callback, priority=priority, id=id,
-            options=self._merge_options({'pass_args': takes_target_args,
-                                         'handles_exception': handles_exception}))
+            options=_merge_options(self.options,
+                                   {'pass_args': takes_target_args,
+                                    'handles_exception': handles_exception}))
 
     def emit(self, exception, *args, **kwargs):
         result = None

@@ -5,8 +5,7 @@ from callbacks.events import Event, ReturnEvent, ExceptionEvent
 
 class AutoCallbacks(CallbackRegistry):
     """
-
-    This is a decorator.  Once a function/method is decorated, callbacks can
+    Once a function/method is decorated with this clas, callbacks can
     be registered to be run before or after the target function (or after the
     target function raises an exception).
 
@@ -149,7 +148,7 @@ class AutoCallbacks(CallbackRegistry):
             handles_exception=handles_exception)
 
 
-def supports_callbacks(event_or_target=None, **options):
+def supports_callbacks(event_or_target=None, event_type=Event, **options):
     if event_or_target is None:
         # @supports_callbacks()
         # def foo(...)
@@ -168,13 +167,11 @@ def supports_callbacks(event_or_target=None, **options):
         # def foo(...)
         event = event_or_target
         def decorator(target):
-            if not hasattr(target, '__callback_registry__'):
-                reg = CallbackRegistry(target, [])
-                target.__callback_registry__ = reg
+            if isinstance(target, CallbackRegistry):
+                reg = target
             else:
-                reg = target.__callback_registry__
-            reg._add_event(Event(event, options=options)
-                           if not isinstance(event, Event) else event)
+                reg = CallbackRegistry(target, [])
+            reg._add_event(event_type(event, options=options))
             return reg
 
         return decorator
