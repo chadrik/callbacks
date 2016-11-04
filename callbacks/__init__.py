@@ -1,4 +1,6 @@
-from .callbacks import supports_callbacks
+from .auto import supports_callbacks
+from .events import Event, ReturnEvent, ExceptionEvent
+
 __version__ = '0.2.0'
 
 __doc__ = """
