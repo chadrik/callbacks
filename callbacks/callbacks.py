@@ -3,7 +3,7 @@ from __future__ import absolute_import, print_function
 import types
 import operator
 from collections import OrderedDict
-from weakref import WeakKeyDictionary, proxy
+from weakref import WeakKeyDictionary
 import inspect
 import sys
 
@@ -28,10 +28,15 @@ class Event(object):
     Holds a set of callbacks registered using `add_callback()` and handles
     executing them when `emit()` is called.
     """
-    def __init__(self, name, target_name=None, parent=None):
+    options = {
+        'pass_args': False,
+    }
+
+    def __init__(self, name, target_name=None, parent=None, options=None):
         self.name = name
         self.target_name = target_name
         self.parent = parent
+        self.options = options or self.__class__.options
         self._initialize()
 
     def _initialize(self):
@@ -46,8 +51,23 @@ class Event(object):
             p = p.parent
         return parents
 
+    def _merge_options(self, options):
+        result = self.options.copy()
+        for key, value in options.items():
+            if value is not None:
+                result[key] = value
+        return result
+
     def _make_child(self):
-        return self.__class__(self.name, self.target_name, parent=self)
+        """
+        Create a new event that is the child of this one.  Used to form a link
+        between a class-level Event and an instance-level Event.
+
+        Returns:
+             Event
+        """
+        return self.__class__(self.name, self.target_name, parent=self,
+                              options=self.options)
 
     @staticmethod
     def _callback_id(target):
@@ -62,6 +82,9 @@ class Event(object):
     def _iter_callbacks(self):
         """
         Iterate over callbacks in order of priority.
+
+        Yields:
+            (id, info)
         """
         # consider all parents when ordering based on priority
         parents = self.parents()
@@ -74,7 +97,7 @@ class Event(object):
         for key, id, info in callbacks:
             yield (id, info)
 
-    def _add_callback(self, callback, priority, id, extra):
+    def _add_callback(self, callback, priority, id, options):
         try:
             priority = float(priority)
         except:
@@ -90,13 +113,13 @@ class Event(object):
         entry = {
             'function': callback,
             'priority': priority,
-            'extra': extra or {}
+            'options': options or {}
         }
         self.callbacks[id] = entry
         return id
 
     def add_callback(self, callback, priority=0, id=None,
-                     takes_target_args=False):
+                     takes_target_args=None):
         """
         Registers the callback.
 
@@ -112,13 +135,13 @@ class Event(object):
                       (see remove_callback)
             takes_target_args: If True, callback function will be passed the
                 arguments and keyword arguments that are supplied to the
-                target function.
+                target function. If None, defaults to the event's default.
         Returns:
             id
         """
         return self._add_callback(
             callback=callback, priority=priority, id=id,
-            extra={'takes_args': takes_target_args})
+            options=self._merge_options({'pass_args': takes_target_args}))
 
     def remove_callback(self, id):
         """
@@ -178,7 +201,7 @@ class Event(object):
         results = {}
         for id, info in self._iter_callbacks():
             callback = info['function']
-            takes_target_args = info['extra']['takes_args']
+            takes_target_args = info['options']['pass_args']
             if takes_target_args:
                 results[id] = callback(*args, **kwargs)
             else:
@@ -188,8 +211,13 @@ class Event(object):
 
 class ReturnEvent(Event):
 
+    options = {
+        'pass_args': False,
+        'pass_result': False
+    }
+
     def add_callback(self, callback, priority=0, id=None,
-                     takes_target_args=False, takes_target_result=False):
+                     takes_target_args=None, takes_target_result=None):
         """
         Registers the callback to be called after the target is called.
 
@@ -205,24 +233,24 @@ class ReturnEvent(Event):
                       (see remove_callback)
             takes_target_args: If True, callback function will be passed the
                 arguments and keyword arguments that are supplied to the
-                target function.
+                target function.  If None, defaults to the event's default.
             takes_target_result: If True, callback will be passed, as
                 its first argument, the value returned from calling the
-                target function.
+                target function. If None, defaults to the event's default.
         Returns:
             id
         """
         return self._add_callback(
             callback=callback, priority=priority, id=id,
-            extra={'takes_args': takes_target_args,
-                   'takes_result': takes_target_result})
+            options=self._merge_options({'pass_args': takes_target_args,
+                                         'pass_result': takes_target_result}))
 
     def emit(self, target_result, *args, **kwargs):
         results = {}
         for id, info in self._iter_callbacks():
             callback = info['function']
-            takes_target_args = info['extra']['takes_args']
-            takes_target_result = info['extra']['takes_result']
+            takes_target_args = info['options']['pass_args']
+            takes_target_result = info['options']['pass_result']
             if takes_target_args and takes_target_result:
                 results[id] = callback(target_result, *args, **kwargs)
             elif takes_target_result:
@@ -236,8 +264,13 @@ class ReturnEvent(Event):
 
 class ExceptionEvent(Event):
 
+    options = {
+        'pass_args': False,
+        'handles_exception': False
+    }
+
     def add_callback(self, callback, priority=0, id=None,
-                     takes_target_args=False, handles_exception=False):
+                     takes_target_args=None, handles_exception=None):
         """
         Registers the callback to be called after the target raises an
         exception.  Exception callbacks are called in priority order and can
@@ -262,21 +295,21 @@ class ExceptionEvent(Event):
                 exception.  If True, this function is responsible for
                 handling the exception or reraising it!  NOTE: If True and
                 the exception has already been handled, this callback will
-                not be called.
+                not be called. If None, defaults to the event's default.
         Returns:
             id
         """
         return self._add_callback(
             callback=callback, priority=priority, id=id,
-            extra={'takes_args': takes_target_args,
-                   'handles_exception': handles_exception})
+            options=self._merge_options({'pass_args': takes_target_args,
+                                         'handles_exception': handles_exception}))
 
     def emit(self, exception, *args, **kwargs):
         result = None
         for id, info in self._iter_callbacks():
             callback = info['function']
-            takes_target_args = info['extra']['takes_args']
-            handles_exception = info['extra']['handles_exception']
+            takes_target_args = info['options']['pass_args']
+            handles_exception = info['options']['handles_exception']
 
             if handles_exception and exception is None:
                 # exception has already been handled, only call callbacks
@@ -323,16 +356,11 @@ class CallbackRegistry(object):
         else:
             self._argspec = inspect.getargspec(target)
 
-        self._events = events
-        self._set_events()
+        self._events = []
+        [self._add_event(event) for event in events]
         # this will hold the registries for instance method callbacks
         self._instance_registries = WeakKeyDictionary()
-        self._initialize()
-        # must occur after initialize:
         self._update_docstring(self.target)
-
-    def _initialize(self):
-        pass
 
     def __repr__(self):
         return '%s(%r)' % (self.__class__.__name__, self.target)
@@ -341,13 +369,15 @@ class CallbackRegistry(object):
         events = [event._make_child() for event in self._events]
         return self.__class__(target, events)
 
-    def _set_events(self):
-        for event in self._events:
-            event.target_name = self.target.__name__
-            setattr(self, event.name, event)
+    def _add_event(self, event):
+        event.target_name = self.target.__name__
+        if hasattr(self, event.name):
+            raise RuntimeError('Event "%s" already registered.' % event.name)
+        setattr(self, event.name, event)
+        self._events.append(event)
 
     def __call__(self, *args, **kwargs):
-        print('self %s %s' % (self, self.target))
+        # print('self %s %s' % (self, self.target))
         return self.target(*args, **kwargs)
 
     def __get__(self, instance, obj_type):
@@ -366,23 +396,23 @@ class CallbackRegistry(object):
 
     @property
     def _callbacks_info(self):
-        extra_ids = set()
+        option_labels = set()
         for event in self._events:
             for info in event.callbacks.values():
-                extra_ids.update(info['extra'].keys())
-        extra_ids = sorted(extra_ids)
-        format_extra = '  '.join(['{%s:<%d}' % (x, len(x))
-                                  for x in extra_ids])
+                option_labels.update(info['options'].keys())
+        option_labels = sorted(option_labels)
+        format_options = '  '.join(['{%s:<%d}' % (x, len(x))
+                                  for x in option_labels])
 
         format_string = ('{id:<38}  {priority:<9}  {order:<6}  {type:<15}  '
-                         '{extra}')
+                         '{options}')
         lines = []
         lines.append(
             format_string.format(id='Label', priority='Priority',
                                  order='Order', type='Event',
-                                 extra=format_extra.format(
+                                 options=format_options.format(
                                      **{x : x.replace('_', ' ').capitalize()
-                                        for x in extra_ids})))
+                                        for x in option_labels})))
 
         def format_val(v):
             if v is True:
@@ -393,13 +423,13 @@ class CallbackRegistry(object):
 
         for event in self._events:
             for order, (id, info) in enumerate(event._iter_callbacks()):
-                extra = info['extra']
+                options = info['options']
                 lines.append(
                     format_string.format(id=id, priority=info['priority'],
                                          order=order, type=event.name,
-                                         extra=format_extra.format(
-                                             **{x : format_val(extra.get(x, 'N/A'))
-                                                for x in extra_ids})).rstrip())
+                                         options=format_options.format(
+                                             **{x : format_val(options.get(x, 'N/A'))
+                                                for x in option_labels})).rstrip())
 
         return '\n'.join(lines)
 
@@ -416,6 +446,7 @@ class CallbackRegistry(object):
             except RuntimeError:
                 continue
             else:
+                # success
                 return
         raise
 
@@ -480,6 +511,11 @@ class AutoCallbacks(CallbackRegistry):
 
     To remove a callback you use:
         <target>.remove_callback(id)
+
+    To remove a callback from a specific event:
+        <target>.on_call.remove_callback(id)
+        <target>.on_return.remove_callback(id)
+        <target>.on_exception.remove_callback(id)
 
     To remove all callbacks use:
         <target>.remove_callbacks()
@@ -615,18 +651,32 @@ class AutoCallbacks(CallbackRegistry):
             handles_exception=handles_exception)
 
 
-def supports_callbacks(*args):
-    if not args:
+def supports_callbacks(event_or_target=None, **options):
+    if event_or_target is None:
         # @supports_callbacks()
+        # def foo(...)
+        assert not options, \
+            "automatic callbacks do not support keyword options"
         return AutoCallbacks
-    elif len(args) == 1 and callable(args[0]):
+    elif callable(event_or_target):
         # @supports_callbacks
-        return AutoCallbacks(args[0])
+        # def foo(...)
+        assert not options, \
+            "automatic callbacks do not support keyword options"
+        return AutoCallbacks(event_or_target)
     else:
-        # @supports_callbacks('event1', 'event2', ReturnEvent('event3'))
+        # @supports_callbacks('event1')
+        # @supports_callbacks(ReturnEvent('event3'))
+        # def foo(...)
+        event = event_or_target
         def decorator(target):
-            return CallbackRegistry(
-                target,
-                [Event(event) if not isinstance(event, Event) else event
-                 for event in args])
+            if not hasattr(target, '__callback_registry__'):
+                reg = CallbackRegistry(target, [])
+                target.__callback_registry__ = reg
+            else:
+                reg = target.__callback_registry__
+            reg._add_event(Event(event, options=options)
+                           if not isinstance(event, Event) else event)
+            return reg
+
         return decorator

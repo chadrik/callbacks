@@ -66,11 +66,11 @@ class TestCallbackDecorator(unittest.TestCase):
                 takes_target_result=True)
         foo.on_exception.add_callback(callback, id='d')
         expected_string = '''\
-Label                                   Priority   Order   Event            Handles exception  Takes args  Takes result
-a                                       0.0        0       on_call          N/A                false       N/A
-b                                       0.0        1       on_call          N/A                true        N/A
-c                                       1.1        0       on_return        N/A                false       true
-d                                       0.0        0       on_exception     false              false       N/A'''
+Label                                   Priority   Order   Event            Handles exception  Pass args  Pass result
+a                                       0.0        0       on_call          N/A                false      N/A
+b                                       0.0        1       on_call          N/A                true       N/A
+c                                       1.1        0       on_return        N/A                false      true
+d                                       0.0        0       on_exception     false              false      N/A'''
         print(foo._callbacks_info)
         self.assertEquals(expected_string, foo._callbacks_info)
 
