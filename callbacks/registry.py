@@ -2,13 +2,17 @@ from __future__ import absolute_import, print_function
 
 import types
 from weakref import WeakKeyDictionary
-import inspect
 import sys
+from typing import *
 
-PY2 = sys.version_info[0] == 2
-PY3 = sys.version_info[0] == 3
+from .events import Event
 
-if PY3:
+CallableT = TypeVar('CallableT', bound=Callable)
+CallbacksT = TypeVar('CallbacksT', bound='Callbacks')
+EventT = TypeVar('EventT', bound=Event)
+
+
+if sys.version_info[0] == 3:
     def get_unbound_function(unbound):
         return unbound
 
@@ -21,73 +25,108 @@ else:
         return types.MethodType(func, obj, obj.__class__)
 
 
-class CallbackRegistry(object):
-    """
-    This decorator enables a function or a class/instance method to register
-    callbacks.
+def _get_events(cls):
+    # type: (type) -> Tuple[Event, ...]
+    # don't check inherited attributes
+    if '__callback_events__' in cls.__dict__:
+        return cls.__callback_events__  # type: ignore
 
-    - Callbacks are organized by Event
-    - A CallbackRegistry stores one or more events as attributes
+    ca_list = [(name, event)
+               for name, event
+               in cls.__dict__.items()
+               if isinstance(event, Event)]
+
+    for name, event in ca_list:
+        if event.name is None:
+            event.name = name
+
+    non_super_events = [
+        event
+        for event_name, event
+        in sorted(ca_list, key=lambda e: e[1].counter)
+    ]
+
+    super_cls = []  # type: List[Event]
+    non_super_names = set(e.name for e in non_super_events)
+    for c in reversed(cls.__mro__[1:-1]):
+        sub_events = _get_events(c)
+        if sub_events is not None:
+            super_cls.extend(
+                e for e in sub_events
+                if e not in super_cls and e.name not in non_super_names
+            )
+
+    all_events = tuple(super_cls + non_super_events)
+    cls.__callback_events__ = all_events  # type: ignore
+    return all_events
+
+
+class Callbacks(Generic[CallableT]):
+    """
+    Holds a target function or method and a set of events with callbacks.
     """
 
-    def __init__(self, target, events):
+    def __init__(self, target):
+        # type: (CallbacksT, CallableT) -> None
+        """
+        Parameters
+        ----------
+        target : CallableT
+        """
         self.target = target
-        if hasattr(target, '_argspec'):
-            self._argspec = target._argspec
-        else:
-            self._argspec = inspect.getargspec(target)
-
-        self._events = []
-        [self._add_event(event) for event in events]
         # this will hold the registries for instance method callbacks
-        self._instance_registries = WeakKeyDictionary()
+        self._instance_registries = WeakKeyDictionary()  # type: WeakKeyDictionary[object, CallbacksT]
+        cls_events = _get_events(self.__class__)
+        self._events = tuple([e.copy(target_name=self.target.__name__)
+                              for e in cls_events])
+        # bind events to the instance
+        for e in self._events:
+            setattr(self, e.name, e)
+
         self._update_docstring(self.target)
 
     def __repr__(self):
         return '%s(%r)' % (self.__class__.__name__, self.target)
 
     def _make_child(self, target):
-        events = [event._make_child() for event in self._events]
-        return self.__class__(target, events)
-
-    def _add_event(self, event):
-        event.target_name = self.target.__name__
-        if hasattr(self, event.name):
-            raise RuntimeError('Event "%s" already registered.' % event.name)
-        setattr(self, event.name, event)
-        self._events.append(event)
+        # type: (CallbacksT, CallableT) -> CallbacksT
+        child = self.__class__(target)
+        for parent_event, child_event in zip(self._events, child._events):
+            child_event.parent = parent_event
+        return child
 
     def __call__(self, *args, **kwargs):
-        # print('self %s %s' % (self, self.target))
         return self.target(*args, **kwargs)
 
     def __get__(self, instance, obj_type):
-        # method is being called on the class instead of an instance
+        # type: (CallbacksT, Optional[object], type) -> CallbacksT
         if instance is None:
+            # method is being called on the class instead of an instance
             return self
 
         if instance not in self._instance_registries:
             target = create_bound_method(self.target, instance)
-            callback_registry = self._make_child(target)
-            self._instance_registries[instance] = callback_registry
+            instance_registry = self._make_child(target)
+            self._instance_registries[instance] = instance_registry
         else:
-            callback_registry = self._instance_registries[instance]
+            instance_registry = self._instance_registries[instance]
 
-        return callback_registry
+        return instance_registry
 
     @property
     def _callbacks_info(self):
+        # type () -> str
         option_labels = set()
         for event in self._events:
-            for info in event.callbacks.values():
-                option_labels.update(info['options'].keys())
+            for entry in event.callbacks.values():
+                option_labels.update(entry.options.keys())
         option_labels = sorted(option_labels)
         format_options = '  '.join(['{%s:<%d}' % (x, len(x))
                                   for x in option_labels])
 
         format_string = ('{id:<38}  {priority:<9}  {order:<6}  {type:<15}  '
                          '{options}')
-        lines = []
+        lines = []  # type: List[str]
         lines.append(
             format_string.format(id='Label', priority='Priority',
                                  order='Order', type='Event',
@@ -103,24 +142,35 @@ class CallbackRegistry(object):
             return v
 
         for event in self._events:
-            for order, (id, info) in enumerate(event._iter_callbacks()):
-                options = info['options']
+            for order, (id, entry) in enumerate(event._iter_callbacks()):
+                options = entry.options
+                options_str = format_options.format(
+                         **{x : format_val(options.get(x, 'N/A'))
+                            for x in option_labels})
                 lines.append(
-                    format_string.format(id=id, priority=info['priority'],
-                                         order=order, type=event.name,
-                                         options=format_options.format(
-                                             **{x : format_val(options.get(x, 'N/A'))
-                                                for x in option_labels})).rstrip())
+                    format_string.format(
+                        id=id, priority=entry.priority,
+                        order=order, type=event.name,
+                        options=options_str).rstrip())
 
         return '\n'.join(lines)
 
     def list_callbacks(self):
+        # type: () -> None
         """
         List all of the callbacks registered to this function or method.
         """
         print(self._callbacks_info)
 
     def remove_callback(self, id):
+        # type: (Hashable) -> None
+        """
+        Remove a callback from all events in this registry.
+
+        Parameters
+        ----------
+        id : Hashable
+        """
         for event in self._events:
             try:
                 event.remove_callback(id)
@@ -132,8 +182,9 @@ class CallbackRegistry(object):
         raise
 
     def remove_callbacks(self):
+        # type: () -> None
         """
-        Remove callbacks from all events.
+        Remove all callbacks from all events in this registry.
 
         Note, for instances, this does not affect callbacks registered at the
         class level.
@@ -144,14 +195,16 @@ class CallbackRegistry(object):
 
     @property
     def num_callbacks(self):
+        # type: () -> int
         """
         Returns the number of callbacks that have been registered on this
         function/method.  If called on an instance-method then it will also
         add the number of class-level callbacks.
 
-        Returns:
-            num_callbacks
-            -or-
+        Returns
+        -------
+        int
+            num_callbacks or
             num_class_level_callbacks + num_instance_level_callbacks
         """
         return sum(len(list(event._iter_callbacks()))

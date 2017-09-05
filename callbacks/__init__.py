@@ -1,9 +1,14 @@
-from .auto import supports_callbacks
+"""
+Register callbacks on functions using decorators.
+"""
+
+from .auto import supports_callbacks, AutoCallbacks, SingleCallback
 from .events import Event, ReturnEvent, ExceptionEvent
+from .registry import Callbacks
+
+# aliases
+auto = AutoCallbacks
+event = SingleCallback
 
 __version__ = '0.2.0'
 
-__doc__ = """
-    This library allows you to place decorators on functions and methods that
-enable them to register callbacks.
-"""
