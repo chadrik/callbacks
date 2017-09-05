@@ -7,3 +7,5 @@
 /.idea
 /AUTHORS
 /ChangeLog
+/.mypy_cache
+/.cache
