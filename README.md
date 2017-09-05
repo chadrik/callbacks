@@ -21,13 +21,18 @@ which are automatically fired when your function is called:
 - `on_return`
 - `on_exeception`
 
-This is great if you don't want to modify existing code to support callbacks,
-but if you need more control over when events are fired, or you want to create
-your own events, you can do that too:
+If you need more control over when events are fired, or you want to create
+your own kinds of events, you can do that too:
 
 
 ```python
-from callbacks import supports_callbacks, ReturnEvent
+from callbacks import supports_callbacks, Callbacks, Event, ReturnEvent
+
+
+class IterReturn(Callbacks):
+    on_iteration = Event(options={'pass_args': True})
+    on_return = ReturnEvent(options={'pass_result': True})
+
 
 def iter_callback(i):
     print i
@@ -35,8 +40,7 @@ def iter_callback(i):
 def result_callback(result):
     print result 
 
-@supports_callbacks('on_iteration', pass_args=True)
-@supports_callbacks('on_return', ReturnEvent, pass_result=True)
+@supports_callbacks(IterReturn)
 def pair_range(num):
     result = []
     for i in range(num):
