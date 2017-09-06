@@ -8,9 +8,11 @@ from typing import *
 from .events import Event
 
 CallableT = TypeVar('CallableT', bound=Callable)
-CallbacksT = TypeVar('CallbacksT', bound='Callbacks')
+T = TypeVar('T', bound='Callbacks')
 EventT = TypeVar('EventT', bound=Event)
 
+if TYPE_CHECKING:
+    Registry = WeakKeyDictionary[object, T]
 
 if sys.version_info[0] == 3:
     def get_unbound_function(unbound):
@@ -67,7 +69,7 @@ class Callbacks(Generic[CallableT]):
     """
 
     def __init__(self, target):
-        # type: (CallbacksT, CallableT) -> None
+        # type: (T, CallableT) -> None
         """
         Parameters
         ----------
@@ -75,7 +77,7 @@ class Callbacks(Generic[CallableT]):
         """
         self.target = target
         # this will hold the registries for instance method callbacks
-        self._instance_registries = WeakKeyDictionary()  # type: WeakKeyDictionary[object, CallbacksT]
+        self._instance_registries = WeakKeyDictionary()  # type: Registry[T]
         cls_events = _get_events(self.__class__)
         self._events = tuple([e.copy(target_name=self.target.__name__)
                               for e in cls_events])
@@ -89,7 +91,7 @@ class Callbacks(Generic[CallableT]):
         return '%s(%r)' % (self.__class__.__name__, self.target)
 
     def _make_child(self, target):
-        # type: (CallbacksT, CallableT) -> CallbacksT
+        # type: (T, CallableT) -> T
         child = self.__class__(target)
         for parent_event, child_event in zip(self._events, child._events):
             child_event.parent = parent_event
@@ -99,13 +101,15 @@ class Callbacks(Generic[CallableT]):
         return self.target(*args, **kwargs)
 
     def __get__(self, instance, obj_type):
-        # type: (CallbacksT, Optional[object], type) -> CallbacksT
+        # type: (T, Optional[object], type) -> T
         if instance is None:
             # method is being called on the class instead of an instance
             return self
 
         if instance not in self._instance_registries:
-            target = create_bound_method(self.target, instance)
+            # FIXME: https://github.com/python/typeshed/issues/1378
+            target = cast(CallableT,
+                          create_bound_method(self.target, instance))
             instance_registry = self._make_child(target)
             self._instance_registries[instance] = instance_registry
         else:
@@ -122,7 +126,7 @@ class Callbacks(Generic[CallableT]):
                 option_labels.update(entry.options.keys())
         option_labels = sorted(option_labels)
         format_options = '  '.join(['{%s:<%d}' % (x, len(x))
-                                  for x in option_labels])
+                                    for x in option_labels])
 
         format_string = ('{id:<38}  {priority:<9}  {order:<6}  {type:<15}  '
                          '{options}')
@@ -131,7 +135,7 @@ class Callbacks(Generic[CallableT]):
             format_string.format(id='Label', priority='Priority',
                                  order='Order', type='Event',
                                  options=format_options.format(
-                                     **{x : x.replace('_', ' ').capitalize()
+                                     **{x: x.replace('_', ' ').capitalize()
                                         for x in option_labels})))
 
         def format_val(v):
@@ -145,8 +149,8 @@ class Callbacks(Generic[CallableT]):
             for order, (id, entry) in enumerate(event._iter_callbacks()):
                 options = entry.options
                 options_str = format_options.format(
-                         **{x : format_val(options.get(x, 'N/A'))
-                            for x in option_labels})
+                    **{x: format_val(options.get(x, 'N/A'))
+                       for x in option_labels})
                 lines.append(
                     format_string.format(
                         id=id, priority=entry.priority,
@@ -217,8 +221,10 @@ class Callbacks(Generic[CallableT]):
 
         lines = ["This %s supports callbacks:"]
         for event in self._events:
-            lines.append('  {}.add_callback(callable) -> id'.format(event.name))
-            lines.append('  {}.remove_callback(id)'.format(event.name))
+            lines.append('  {}.add_callback(callable) -> id'
+                         .format(event.name))
+            lines.append('  {}.remove_callback(id)'
+                         .format(event.name))
         lines.extend(
             [
                 '  remove_callbacks()',
@@ -228,4 +234,3 @@ class Callbacks(Generic[CallableT]):
         # TODO: smarter entabbing
         lines = ["    " + line for line in lines]
         self.__doc__ = old_docstring + '\n'.join(lines)
-

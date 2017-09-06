@@ -10,11 +10,11 @@ from typing import *
 EventT = TypeVar('EventT', bound='Event')
 HashableT = TypeVar('HashableT', bound=Hashable)
 CallableT = TypeVar('CallableT', bound=Callable)
-
+Options = Dict[str, Any]
 Entry = NamedTuple('Entry', [
     ('function', Callable),
     ('priority', float),
-    ('options', Dict[str, Any])
+    ('options', Options)
 ])
 
 
@@ -40,20 +40,20 @@ class Event(Generic[CallableT]):
 
     options = {
         'pass_args': False,
-    }  # type: Dict[str, Any]
+    }  # type: Options
 
-    def __init__(self, name=None, options=None, parent=None, target_name=None):
-        # type: (Optional[str], Optional[Dict[str, Any]], Optional[Event], Optional[str]) -> None
+    def __init__(self, name=None, options=None, target_name=None):
+        # type: (Optional[str], Optional[Options], Optional[str]) -> None
         """
         Parameters
         ----------
         name : str
         target_name : Optional[str]
-        parent : Optional[Event]
-        options : Optional[Dict[str, Any]]
+        options : Options
             Default options for the event.  Can be overridden per-callback
             via add_callback()
         """
+        self.parent = None  # type: Event
         self.counter = None
         self.target_name = target_name
         self.callbacks = None  # type: OrderedDict[Hashable, Entry]
@@ -64,7 +64,7 @@ class Event(Generic[CallableT]):
         else:
             self._initialize()
         self.name = name
-        self.parent = parent
+
         self.options = _merge_options(type(self).options, options or {})
 
     def _initialize(self):
@@ -73,7 +73,9 @@ class Event(Generic[CallableT]):
 
     def copy(self, include_callbacks=False, target_name=None):
         # type: (EventT, bool, Optional[str]) -> EventT
-        e = self.__class__(self.name, self.options, self.parent, target_name or self.target_name)
+        e = self.__class__(self.name, self.options,
+                           target_name or self.target_name)
+        e.parent = self.parent
         e.counter = self.counter
         if include_callbacks:
             e.callbacks = self.callbacks.copy()
@@ -133,13 +135,13 @@ class Event(Generic[CallableT]):
                 callbacks.append(((entry.priority, depth), id, entry))
         callbacks.sort(key=operator.itemgetter(0), reverse=True)
 
-        for key, id, entry in callbacks:
+        for _, id, entry in callbacks:
             yield (id, entry)
 
     def _add_callback(self, callback, priority, id, options):
         try:
             priority = float(priority)
-        except:
+        except ValueError:
             raise ValueError('Priority could not be cast into a float.')
 
         if id is None:
@@ -389,7 +391,7 @@ class ExceptionEvent(Event[CallableT]):
 
     def emit(self, exception, *args, **kwargs):
         result = None
-        for id, entry in self._iter_callbacks():
+        for _, entry in self._iter_callbacks():
             callback = entry.function
             takes_target_args = entry.options['pass_args']
             handles_exception = entry.options['handles_exception']

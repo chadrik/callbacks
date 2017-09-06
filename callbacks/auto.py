@@ -184,7 +184,13 @@ class AutoCallbacks(Callbacks[T]):
 
 
 @overload
-def supports_callbacks(cb=AutoCallbacks):
+def supports_callbacks():
+    # type: () -> Type[AutoCallbacks]
+    pass
+
+
+@overload
+def supports_callbacks(cb):
     # type: (Type[CallbacksT]) -> Type[CallbacksT]
     pass
 

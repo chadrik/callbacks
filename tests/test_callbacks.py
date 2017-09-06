@@ -302,4 +302,5 @@ d                                       0.0        0       on_exception     fals
 
         self.assertEquals(l1, 1)
         self.assertEquals(l2, 2)
-        self.assertEquals(type(l3), int)
+        # value returned by id() in cpython is int, in pypy is long
+        self.assertEquals(type(l3), type(id(None)))
