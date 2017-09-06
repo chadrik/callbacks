@@ -39,7 +39,7 @@ class Event(Generic[CallableT]):
     cls_counter = 0  # type: ClassVar[int]
 
     options = {
-        'pass_args': False,
+        'pass_args': True,
     }  # type: Options
 
     def __init__(self, name=None, options=None, target_name=None):
@@ -279,7 +279,7 @@ class Event(Generic[CallableT]):
 class ReturnEvent(Event[CallableT]):
 
     options = {
-        'pass_args': False,
+        'pass_args': True,
         'pass_result': False
     }
 
@@ -341,7 +341,7 @@ class ReturnEvent(Event[CallableT]):
 class ExceptionEvent(Event[CallableT]):
 
     options = {
-        'pass_args': False,
+        'pass_args': True,
         'handles_exception': False
     }
 

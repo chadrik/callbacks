@@ -87,8 +87,7 @@ def test_decorator():
 
 
 def test_options(func):
-    assert func.on_return.options == {'pass_args': False, 'pass_result': True}
-
+    assert func.on_return.options == {'pass_args': True, 'pass_result': True}
     assert func.on_iteration.options == {'pass_args': True}
 
     with pytest.raises(RuntimeError):

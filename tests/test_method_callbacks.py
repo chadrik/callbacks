@@ -12,6 +12,7 @@ def example_callback(*args, **kwargs):
                 (str(args), str(kwargs)))
     callback_called_with.append((args, kwargs))
 
+
 class ExampleClass(object):
     def __init__(self):
         self.method_called_with = []
@@ -36,9 +37,10 @@ class TestOnMethod(unittest.TestCase):
         self.assertEquals(len(callback_called_with), 0)
         self.assertEquals(len(e.method_called_with), 1)
         self.assertEquals(e.method_called_with[0],
-                ((10, 20), {'key':'value'}))
+                ((10, 20), {'key': 'value'}))
 
-        e.example_method.on_return.add_callback(example_callback)
+        e.example_method.on_return.add_callback(example_callback,
+                                                takes_target_args=False)
 
         e.example_method(11, 21, key='another_value')
         self.assertEquals(len(callback_called_with), 1)
@@ -55,16 +57,16 @@ class TestOnMethod(unittest.TestCase):
         self.assertEquals(len(callback_called_with), 0)
         self.assertEquals(len(e.method_called_with), 1)
         self.assertEquals(e.method_called_with[0],
-                ((10, 20), {'key':'value'}))
+                ((10, 20), {'key': 'value'}))
 
         e.example_method.on_return.add_callback(example_callback,
-                takes_target_args=True)
+                                                takes_target_args=True)
 
         e.example_method(11, 21, key='another_value')
         self.assertEquals(len(callback_called_with), 1)
         self.assertEquals(len(e.method_called_with), 2)
 
         self.assertEquals(e.method_called_with[1],
-                ((11, 21), {'key':'another_value'}))
+                ((11, 21), {'key': 'another_value'}))
         self.assertEquals(callback_called_with[0],
-                ((11, 21), {'key':'another_value'}))
+                ((11, 21), {'key': 'another_value'}))
